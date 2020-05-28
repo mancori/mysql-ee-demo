@@ -1,0 +1,68 @@
+-- #1.  List of scripts to set up in advance to open in advance:
+--        download and import sakila DB and connect with workbench
+--        tail -n20 -f /var/lib/mysql/audit.log
+--        /usr/local/mysql/bin/mysqlslap --user=john --password='password' --auto-generate-sql --concurrency=50 --number-char-cols=4
+
+-- #2   show SQL statement with audit_log_filter_linux_install, but install prior to demo
+--        - then, pre-load "all audit" into workbench cache (do in advance so that there 
+--            are no connection or caching issues.
+--        - Then execute "log_all" filter below to simulate and then slap to simulate logging
+--        - Explain difficulties of logging everything, too much data, hard to manager
+
+-- #3.  Best practice: log only what's needed and execute filter below 
+--         - execute salary filter below
+--         - *important* -- on new connection, modify salaries table (from sakila DB)
+--         review tail -n20 -f /var/lib/mysql/audit.log to show only changes to salary table
+
+--  #4.  Fun part, in filter, change "log": { "field": { "name": "table_name.str", "value": "salaries" }}
+--         to "abort": { "field": { "name": "table_name.str", "value": "salaries" }}
+-- 			*important* -- reconnect and modify salary again.  Error will be received
+
+shell> mysql -u root -p < audit_log_filter_linux_install.sql
+
+SELECT audit_log_filter_set_filter('log_all', '{ "filter": { "log": true } }');
+SELECT audit_log_filter_set_user('%', 'log_all’);
+
+-- script to clear filter
+use mysql;
+DELETE FROM audit_log_user;
+DELETE FROM audit_log_filter;
+SELECT audit_log_filter_flush() AS ‘Result’;
+
+-- filter on only salaries
+-- show in tail -n20 -f /var/lib/mysql/audit.log
+SET @f='                                                        
+ {
+    "filter": {
+       "class": {
+          "name": "table_access",
+          "event": {
+              "name": [ "insert", "update", "delete" ],
+              "log": { "field": { "name": "table_name.str", "value": "salaries" }}
+           }
+        }
+     }
+}';                                            
+
+
+SET @f='                                                        
+ {
+    "filter": {
+       "class": {
+          "name": "table_access",
+          "event": {
+              "name": [ "insert", "update", "delete" ],
+              "abort": { "field": { "name": "table_name.str", "value": "salaries" }}
+           }
+        }
+     }
+}';                                            
+
+
+
+SELECT audit_log_filter_set_filter ('salary_inserts', @f);
+SELECT audit_log_filter_set_user('%', 'salary_inserts');
+
+update payroll.salaries set salary=90000 where emp_no=10001;
+
+
